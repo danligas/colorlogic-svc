@@ -1,0 +1,115 @@
+import * as amqp from 'amqplib/callback_api';
+import * as gpio from 'rpi-gpio';
+import pinState from './conf';
+
+const q = 'cl-a';
+let pinAr = [];
+
+for (let pin of pinState) {
+   console.log(pin);
+   gpio.setup(pin.P, gpio.DIR_HIGH, (err) => {
+      if (err) throw err;
+   });
+   pinAr[pin.P] = Object.assign(pin);
+}
+  console.log(JSON.stringify(pinAr));
+
+// Connect to the server and wait for the queue
+amqp.connect('amqp://localhost', (err, conn) => {
+    conn.createChannel((err, ch) => {
+      ch.assertQueue(q, { durable: true });
+      console.log(' [*] Waiting for messages in %s. To exit press CTRL+C', q);
+      ch.consume(q, msg => {
+            console.log(' --- Received %s', msg.content);  
+            var c = JSON.parse(msg.content);
+//            conn.close();            
+            if (c.newState) TransitionToNewState (c.newState);
+            if (c.newSwitch) Switch(c.newSwitch);
+            if (c.sync) SyncLights(29);
+      }, {
+          noAck: true
+      });
+    });
+})
+
+function Switch (nSwitch) {
+  console.log(JSON.stringify(nSwitch));
+  for (let pin of nSwitch) {
+    console.log(JSON.stringify(pin));
+    gpio.write(pin.P, pin.S, function (err) {
+      if (err) throw err;
+      console.log(pin.S + ' Written to pin ' + pin.P);
+    })
+  }
+}
+
+
+function TransitionToNewState (nState) {
+  console.log(JSON.stringify(nState));
+  for (let pin of nState) {
+    console.log(JSON.stringify(pin));
+    if (pin.C > pinAr[pin.P].C) // Color is ahead
+    {
+      makePulses(pin.P, pin.C - pinAr[pin.P].C);
+    }
+    else if (pin.C < pinAr[pin.P].C) // Color is behind
+    {
+      makePulses(pin.P, 17 - pinAr[pin.P].C + pin.C);
+    }
+    pinAr[pin.P].C = pin.C;
+  }
+}
+
+function Pulse(P, N) {
+  console.log('Pulsing pin ' + P + ', ' + N + ' pulses.');
+}
+
+
+// Make a high going pulse on the output of duration "time" milliseconds
+function makePulses (pin, count) {
+  // Set the pin high
+  gpio.write(pin, false, function (err) {
+    if (err) throw err;
+    console.log('Low Written to pin ' + pin);
+  });
+
+  // Ater "time" milliseconds set the pin low again.
+  setTimeout(() => {
+    gpio.write(pin, true, function (err) {
+      if (err) throw err;
+      console.log('High Written to pin ' + pin);
+    })
+    setTimeout(() => {
+      if (count > 1) makePulses (pin, count - 1);
+    }, 500);
+  }, 500);
+}
+
+// Make a high going pulse on the output of duration "time" milliseconds
+function SyncLights (pin) {
+  // Set the pin high
+  gpio.write(pin, true, function (err) {
+    if (err) throw err;
+    console.log('turn off pin ' + pin);
+  });
+
+  setTimeout(() => {
+    gpio.write(pin, false, function (err) {
+      if (err) throw err;
+      console.log('turn on pin ' + pin);
+    })
+    setTimeout(() => {
+      gpio.write(pin, true, function (err) {
+        if (err) throw err;
+        console.log('turn off pin ' + pin);
+      })
+      setTimeout(() => {
+         gpio.write(pin, false, function (err) {
+          if (err) throw err;
+          console.log('turn on pin ' + pin);
+        })
+      }, 11000);
+    }, 11000);
+  }, 11000);
+}
+
